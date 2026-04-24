@@ -14,6 +14,8 @@ from agents.fb.agent import FB
 from agents.cfb.agent import CFB
 from agents.cql.agent import CQL
 from agents.sf.agent import SF
+from agents.td_jepa.agent import TDJEPA
+from agents.td_jepa.config import load_td_jepa_config
 from agents.base import D4RLReplayBuffer
 from utils import set_seed_everywhere
 
@@ -21,6 +23,8 @@ parser = ArgumentParser()
 parser.add_argument("algorithm", type=str)
 parser.add_argument("domain_name", type=str)
 parser.add_argument("dataset", type=str)
+parser.add_argument("--tilt", action="store_true")
+parser.add_argument("--tilt_temperature", type=float)
 parser.add_argument(
     "--wandb_logging", default=True, action=argparse.BooleanOptionalAction
 )
@@ -46,6 +50,9 @@ elif args.algorithm == "dvcfb":
     args.dvcfb = True
 
 working_dir = Path.cwd()
+if args.tilt:
+    if args.algorithm not in {"td_jepa", "fb"}:
+        raise ValueError(f"--tilt is not supported for algorithm '{args.algorithm}'.")
 
 if args.algorithm in ("vcfb", "mcfb", "dvcfb"):
     algo_dir = "cfb"
@@ -56,16 +63,24 @@ elif args.algorithm in ("sf-lap", "sf-hilp"):
     algo_dir = "sf"
     config_path = working_dir / "agents" / algo_dir / "config.yaml"
     model_dir = working_dir / "agents" / algo_dir / "saved_models"
+elif args.algorithm == "td_jepa":
+    config = load_td_jepa_config(tilt=args.tilt)
+    model_dir = working_dir / "agents" / args.algorithm / "saved_models"
 else:
     config_path = working_dir / "agents" / args.algorithm / "config.yaml"
     model_dir = working_dir / "agents" / args.algorithm / "saved_models"
 
-with open(config_path, "rb") as f:
-    config = yaml.safe_load(f)
+if args.algorithm != "td_jepa":
+    with open(config_path, "rb") as f:
+        config = yaml.safe_load(f)
 
 time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
-config.update(vars(args))
+cli_args = vars(args).copy()
+tilt_temperature_override = cli_args.pop("tilt_temperature", None)
+config.update(cli_args)
+if tilt_temperature_override is not None:
+    config["tilt_temperature"] = tilt_temperature_override
 
 if config["device"] is None:
     config["device"] = torch.device(
@@ -165,6 +180,10 @@ elif config["algorithm"] == "fb":
         std_dev_clip=config["std_dev_clip"],
         std_dev_schedule=config["std_dev_schedule"],
         tau=config["tau"],
+        tilt=config["tilt"],
+        tilt_beta=config["tilt_beta"],
+        tilt_temperature=config["tilt_temperature"],
+        tilt_candidate_multiplier=config["tilt_candidate_multiplier"],
         device=config["device"],
         name=config["name"],
     )
@@ -172,6 +191,66 @@ elif config["algorithm"] == "fb":
     z_inference_steps = config["z_inference_steps"]
     train_std = config["std_dev_schedule"]
     eval_std = config["std_dev_eval"]
+
+elif config["algorithm"] == "td_jepa":
+    agent = TDJEPA(
+        observation_length=observation_length,
+        action_length=action_length,
+        device=config["device"],
+        name=config["name"],
+        batch_size=config["batch_size"],
+        discount=config["discount"],
+        lr_predictor=config["lr_predictor"],
+        lr_phi=config["lr_phi"],
+        lr_psi=config["lr_psi"],
+        lr_actor=config["lr_actor"],
+        weight_decay=config["weight_decay"],
+        encoder_target_tau=config["encoder_target_tau"],
+        predictor_target_tau=config["predictor_target_tau"],
+        phi_ortho_coef=config["phi_ortho_coef"],
+        psi_ortho_coef=config["psi_ortho_coef"],
+        train_goal_ratio=config["train_goal_ratio"],
+        predictor_pessimism_penalty=config["predictor_pessimism_penalty"],
+        actor_pessimism_penalty=config["actor_pessimism_penalty"],
+        stddev_clip=config["stddev_clip"],
+        bc_coeff=config["bc_coeff"],
+        log_eigvals=config["log_eigvals"],
+        scale_train_goals=config["scale_train_goals"],
+        tilt=config["tilt"],
+        tilt_beta=config["tilt_beta"],
+        tilt_temperature=config["tilt_temperature"],
+        tilt_candidate_multiplier=config["tilt_candidate_multiplier"],
+        actor_std=config["actor_std"],
+        actor_use_full_encoder=config["actor_use_full_encoder"],
+        symmetric=config["symmetric"],
+        compile=config["compile"],
+        phi_dim=config["phi_dim"],
+        psi_dim=config["psi_dim"],
+        norm_z=config["norm_z"],
+        rgb_encoder_name=config["rgb_encoder_name"],
+        augmentator_name=config["augmentator_name"],
+        phi_predictor_hidden_dim=config["phi_predictor_hidden_dim"],
+        phi_predictor_hidden_layers=config["phi_predictor_hidden_layers"],
+        phi_predictor_embedding_layers=config["phi_predictor_embedding_layers"],
+        phi_predictor_num_parallel=config["phi_predictor_num_parallel"],
+        psi_predictor_hidden_dim=config["psi_predictor_hidden_dim"],
+        psi_predictor_hidden_layers=config["psi_predictor_hidden_layers"],
+        psi_predictor_embedding_layers=config["psi_predictor_embedding_layers"],
+        psi_predictor_num_parallel=config["psi_predictor_num_parallel"],
+        phi_mlp_hidden_dim=config["phi_mlp_hidden_dim"],
+        phi_mlp_hidden_layers=config["phi_mlp_hidden_layers"],
+        phi_mlp_norm=config["phi_mlp_norm"],
+        psi_mlp_hidden_dim=config["psi_mlp_hidden_dim"],
+        psi_mlp_hidden_layers=config["psi_mlp_hidden_layers"],
+        psi_mlp_norm=config["psi_mlp_norm"],
+        actor_hidden_dim=config["actor_hidden_dim"],
+        actor_hidden_layers=config["actor_hidden_layers"],
+        actor_embedding_layers=config["actor_embedding_layers"],
+    )
+
+    z_inference_steps = config["z_inference_steps"]
+    train_std = None
+    eval_std = None
 
 elif config["algorithm"] in ["sf-lap", "sf-hilp"]:
 

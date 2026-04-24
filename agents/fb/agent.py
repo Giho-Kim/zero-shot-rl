@@ -10,6 +10,7 @@ import numpy as np
 from agents.fb.models import ForwardBackwardRepresentation, ActorModel
 from agents.base import AbstractAgent, Batch, AbstractGaussianActor
 from agents.utils import schedule
+from metamotivo.agents.tilt import TiltLatentSelector
 
 
 class FB(AbstractAgent):
@@ -45,6 +46,10 @@ class FB(AbstractAgent):
         std_dev_clip: float,
         std_dev_schedule: str,
         tau: float,
+        tilt: bool,
+        tilt_beta: float,
+        tilt_temperature: float,
+        tilt_candidate_multiplier: int,
         device: torch.device,
         name: str,
     ):
@@ -123,6 +128,14 @@ class FB(AbstractAgent):
         self._tau = tau
         self._z_dimension = z_dimension
         self.std_dev_schedule = std_dev_schedule
+        self.tilt = None
+        if tilt:
+            self.tilt = TiltLatentSelector(
+                z=self.sample_z(size=self.batch_size),
+                beta=tilt_beta,
+                temperature=tilt_temperature,
+                candidate_multiplier=tilt_candidate_multiplier,
+            )
 
     @torch.no_grad()
     def act(
@@ -168,21 +181,19 @@ class FB(AbstractAgent):
             metrics: dictionary of metrics for logging
         """
 
-        # sample zs and mix
-        # sample zs and mix
-        zs = self.sample_z(size=self.batch_size)
         perm = torch.randperm(self.batch_size)
         backward_input = batch.observations[perm]
-        mix_indices = np.where(np.random.rand(self.batch_size) < self._z_mix_ratio)[0]
-        with torch.no_grad():
-            mix_zs = self.FB.backward_representation(
-                backward_input[mix_indices]
-            ).detach()
-            mix_zs = math.sqrt(self._z_dimension) * torch.nn.functional.normalize(
-                mix_zs, dim=1
+        if self.tilt is not None:
+            self.tilt.refresh(
+                init_features=batch.observations,
+                sample_z=lambda size: self.sample_z(size=size),
+                score_fn=lambda observations, z_candidates: self.score_and_features(
+                    observations=observations,
+                    z=z_candidates,
+                    step=step,
+                ),
             )
-
-        zs[mix_indices] = mix_zs
+        zs = self.sample_mixed_z(train_goal=backward_input)
         actor_zs = zs.clone().requires_grad_(True)
         actor_observations = batch.observations.clone().requires_grad_(True)
 
@@ -219,6 +230,51 @@ class FB(AbstractAgent):
         }
 
         return metrics
+
+    @torch.no_grad()
+    def sample_mixed_z(self, train_goal: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if self.tilt is None:
+            zs = self.sample_z(size=self.batch_size)
+        else:
+            zs = self.tilt.z.clone()
+
+        if train_goal is not None:
+            mix_indices = np.where(np.random.rand(self.batch_size) < self._z_mix_ratio)[0]
+            mix_zs = self.FB.backward_representation(train_goal[mix_indices]).detach()
+            mix_zs = math.sqrt(self._z_dimension) * torch.nn.functional.normalize(
+                mix_zs, dim=1
+            )
+            zs[mix_indices] = mix_zs
+
+        return zs
+
+    @torch.no_grad()
+    def score_and_features(
+        self,
+        observations: torch.Tensor,
+        z: torch.Tensor,
+        step: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        std = schedule(self.std_dev_schedule, step)
+        actions, _ = self.actor(observations, z, std, sample=True)
+        target_f1, target_f2 = self.FB.forward_representation_target(
+            observation=observations,
+            z=z,
+            action=actions,
+        )
+        features = 0.5 * (target_f1 + target_f2)
+
+        ridge_alpha = 1e-3
+        ridge_min = 1e-8
+        trace_g = torch.trace(self.tilt.gram)
+        lam = max(ridge_alpha * trace_g.item() / self.tilt.gram.shape[0], ridge_min)
+        identity = torch.eye(
+            features.shape[-1], device=features.device, dtype=features.dtype
+        )
+        ginv = torch.linalg.pinv(self.tilt.gram + lam * identity)
+        projected = features @ ginv
+        score = torch.sum(projected * features, dim=1)
+        return score, features
 
     def update_fb(
         self,
