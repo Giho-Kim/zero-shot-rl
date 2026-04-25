@@ -31,6 +31,8 @@ parser.add_argument("domain_name", type=str)
 parser.add_argument("exploration_algorithm", type=str)
 parser.add_argument("--tilt", action="store_true")
 parser.add_argument("--tilt_temperature", type=float)
+parser.add_argument("--tilt_temperature_start", type=float)
+parser.add_argument("--tilt_temperature_end", type=float)
 parser.add_argument("--wandb_logging", type=str, default="True")
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--alpha", type=float, default=0.01)
@@ -106,8 +108,22 @@ if args.algorithm != "td_jepa":
 
 cli_args = vars(args).copy()
 tilt_temperature_override = cli_args.pop("tilt_temperature", None)
+tilt_temperature_start_override = cli_args.pop("tilt_temperature_start", None)
+tilt_temperature_end_override = cli_args.pop("tilt_temperature_end", None)
 config.update(cli_args)
-if tilt_temperature_override is not None:
+if tilt_temperature_start_override is not None:
+    config["tilt_temperature_start"] = tilt_temperature_start_override
+if tilt_temperature_end_override is not None:
+    config["tilt_temperature_end"] = tilt_temperature_end_override
+if (
+    tilt_temperature_override is not None
+    and tilt_temperature_start_override is None
+    and tilt_temperature_end_override is None
+):
+    config["tilt_temperature"] = tilt_temperature_override
+    config["tilt_temperature_start"] = tilt_temperature_override
+    config["tilt_temperature_end"] = tilt_temperature_override
+elif tilt_temperature_override is not None:
     config["tilt_temperature"] = tilt_temperature_override
 config["device"] = torch.device(
     "cuda"
@@ -272,9 +288,12 @@ elif config["algorithm"] == "td_jepa":
         bc_coeff=config["bc_coeff"],
         log_eigvals=config["log_eigvals"],
         scale_train_goals=config["scale_train_goals"],
+        learning_steps=config["learning_steps"],
         tilt=config["tilt"],
         tilt_beta=config["tilt_beta"],
         tilt_temperature=config["tilt_temperature"],
+        tilt_temperature_start=config["tilt_temperature_start"],
+        tilt_temperature_end=config["tilt_temperature_end"],
         tilt_candidate_multiplier=config["tilt_candidate_multiplier"],
         actor_std=config["actor_std"],
         actor_use_full_encoder=config["actor_use_full_encoder"],
@@ -354,9 +373,12 @@ elif config["algorithm"] == "fb":
         std_dev_clip=config["std_dev_clip"],
         std_dev_schedule=config["std_dev_schedule"],
         tau=config["tau"],
+        learning_steps=config["learning_steps"],
         tilt=config["tilt"],
         tilt_beta=config["tilt_beta"],
         tilt_temperature=config["tilt_temperature"],
+        tilt_temperature_start=config["tilt_temperature_start"],
+        tilt_temperature_end=config["tilt_temperature_end"],
         tilt_candidate_multiplier=config["tilt_candidate_multiplier"],
         device=config["device"],
         name=config["name"],

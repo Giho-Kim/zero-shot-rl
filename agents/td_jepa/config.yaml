@@ -26,6 +26,8 @@ scale_train_goals: false
 tilt: false
 tilt_beta: 0.995
 tilt_temperature: 20.0
+tilt_temperature_start: 20.0
+tilt_temperature_end: 1.0
 tilt_candidate_multiplier: 10
 
 actor_std: 0.2

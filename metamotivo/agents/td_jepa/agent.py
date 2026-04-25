@@ -39,9 +39,12 @@ class TDJEPAAgentTrainConfig(BaseConfig):
     bc_coeff: float = 0.0
     log_eigvals: bool = False
     scale_train_goals: bool = False
+    learning_steps: int = 1_000_000
     tilt: bool = False
     tilt_beta: float = 0.995
     tilt_temperature: float = 20.0
+    tilt_temperature_start: float = 20.0
+    tilt_temperature_end: float = 1.0
     tilt_candidate_multiplier: int = 10
 
 

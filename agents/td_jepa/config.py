@@ -19,6 +19,8 @@ TRAIN_DEFAULTS = {
     "scale_train_goals": False,
     "tilt_beta": 0.995,
     "tilt_temperature": 20.0,
+    "tilt_temperature_start": 20.0,
+    "tilt_temperature_end": 1.0,
     "tilt_candidate_multiplier": 2,
 }
 
@@ -110,6 +112,12 @@ def load_td_jepa_config(tilt: bool) -> Dict[str, Any]:
         "tilt_beta": train_cfg.get("tilt_beta", TRAIN_DEFAULTS["tilt_beta"]),
         "tilt_temperature": train_cfg.get(
             "tilt_temperature", TRAIN_DEFAULTS["tilt_temperature"]
+        ),
+        "tilt_temperature_start": train_cfg.get(
+            "tilt_temperature_start", train_cfg.get("tilt_temperature", TRAIN_DEFAULTS["tilt_temperature_start"])
+        ),
+        "tilt_temperature_end": train_cfg.get(
+            "tilt_temperature_end", train_cfg.get("tilt_temperature", TRAIN_DEFAULTS["tilt_temperature_end"])
         ),
         "tilt_candidate_multiplier": TRAIN_DEFAULTS["tilt_candidate_multiplier"],
         "actor_std": model_cfg.get("actor_std", MODEL_DEFAULTS["actor_std"]),

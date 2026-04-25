@@ -46,9 +46,12 @@ class FB(AbstractAgent):
         std_dev_clip: float,
         std_dev_schedule: str,
         tau: float,
+        learning_steps: int,
         tilt: bool,
         tilt_beta: float,
         tilt_temperature: float,
+        tilt_temperature_start: float,
+        tilt_temperature_end: float,
         tilt_candidate_multiplier: int,
         device: torch.device,
         name: str,
@@ -127,6 +130,9 @@ class FB(AbstractAgent):
         self._z_mix_ratio = z_mix_ratio
         self._tau = tau
         self._z_dimension = z_dimension
+        self._learning_steps = max(1, learning_steps)
+        self._tilt_temperature_start = tilt_temperature_start
+        self._tilt_temperature_end = tilt_temperature_end
         self.std_dev_schedule = std_dev_schedule
         self.tilt = None
         if tilt:
@@ -136,6 +142,12 @@ class FB(AbstractAgent):
                 temperature=tilt_temperature,
                 candidate_multiplier=tilt_candidate_multiplier,
             )
+
+    def _tilt_temperature(self, step: int) -> float:
+        progress = min(max(step, 0) / self._learning_steps, 1.0)
+        return self._tilt_temperature_start + progress * (
+            self._tilt_temperature_end - self._tilt_temperature_start
+        )
 
     @torch.no_grad()
     def act(
@@ -184,6 +196,7 @@ class FB(AbstractAgent):
         perm = torch.randperm(self.batch_size)
         backward_input = batch.observations[perm]
         if self.tilt is not None:
+            self.tilt.temperature = self._tilt_temperature(step)
             self.tilt.refresh(
                 init_features=batch.observations,
                 sample_z=lambda size: self.sample_z(size=size),

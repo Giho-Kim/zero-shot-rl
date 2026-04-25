@@ -70,9 +70,12 @@ class TDJEPA(AbstractAgent):
         bc_coeff: float,
         log_eigvals: bool,
         scale_train_goals: bool,
+        learning_steps: int,
         tilt: bool,
         tilt_beta: float,
         tilt_temperature: float,
+        tilt_temperature_start: float,
+        tilt_temperature_end: float,
         tilt_candidate_multiplier: int,
         actor_std: float,
         actor_use_full_encoder: bool,
@@ -182,8 +185,11 @@ class TDJEPA(AbstractAgent):
             log_eigvals=log_eigvals,
             scale_train_goals=scale_train_goals,
             tilt=tilt,
+            learning_steps=learning_steps,
             tilt_beta=tilt_beta,
             tilt_temperature=tilt_temperature,
+            tilt_temperature_start=tilt_temperature_start,
+            tilt_temperature_end=tilt_temperature_end,
             tilt_candidate_multiplier=tilt_candidate_multiplier,
         )
         cfg = TDJEPAAgentConfig(model=model_cfg, train=train_cfg, compile=compile)
@@ -205,6 +211,11 @@ class TDJEPA(AbstractAgent):
 
     def update(self, batch: Batch, step: int) -> Dict[str, float]:
         init_obs = batch.observations.detach().cpu().numpy()
+        if self.agent.tilt is not None:
+            progress = min(max(step, 0) / self.agent.cfg.train.learning_steps, 1.0)
+            self.agent.tilt.temperature = self.agent.cfg.train.tilt_temperature_start + progress * (
+                self.agent.cfg.train.tilt_temperature_end - self.agent.cfg.train.tilt_temperature_start
+            )
         metrics = self.agent.update(_SingleBatchReplayBuffer(batch), step=step, init_obs=init_obs)
         return {key: float(value.detach().cpu()) for key, value in metrics.items()}
 
