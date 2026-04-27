@@ -653,6 +653,7 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         self._task = task
         self._relabel = relabel
         self._action_condition = action_condition
+        self.storage_device = torch.device("cpu")
         self.storage = {}
 
         # load dataset on init
@@ -711,23 +712,26 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
 
             # store in lists
             observations.append(
-                torch.as_tensor(episode["observation"][:-1], device=self.device)
+                torch.as_tensor(episode["observation"][:-1], dtype=torch.float32)
             )
-            actions.append(torch.as_tensor(episode["action"][1:], device=self.device))
-            rewards.append(torch.as_tensor(episode["reward"][1:], device=self.device))
+            actions.append(
+                torch.as_tensor(episode["action"][1:], dtype=torch.float32)
+            )
+            rewards.append(
+                torch.as_tensor(episode["reward"][1:], dtype=torch.float32)
+            )
             next_observations.append(
-                torch.as_tensor(episode["observation"][1:], device=self.device)
+                torch.as_tensor(episode["observation"][1:], dtype=torch.float32)
             )
             discounts.append(
                 torch.as_tensor(
-                    episode["discount"][1:] * self._discount, device=self.device
+                    episode["discount"][1:] * self._discount,
+                    dtype=torch.float32,
                 )
             )
             physics.append(np.array(episode["physics"][:-1]))
             # hack the dones (we know last transition is terminal)
-            not_done = torch.ones_like(
-                torch.tensor(episode["reward"]), device=self.device
-            )
+            not_done = torch.ones_like(torch.tensor(episode["reward"], dtype=torch.float32))
             not_done[-1] = 0
             not_dones.append(not_done)
 
@@ -744,13 +748,13 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
             future_observations.append(
                 torch.as_tensor(
                     episode["observation"][future_idxs],
-                    device=self.device,
+                    dtype=torch.float32,
                 )
             )
             future_goals.append(
                 torch.as_tensor(
                     episode["observation"][future_idxs],
-                    device=self.device,
+                    dtype=torch.float32,
                 ),
             )
 
@@ -771,7 +775,8 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
             )
             gciql_goals.append(
                 torch.as_tensor(
-                    episode["observation"][:-1][gciql_goal_idxs], device=self.device
+                    episode["observation"][:-1][gciql_goal_idxs],
+                    dtype=torch.float32,
                 )
             )
 
@@ -813,10 +818,7 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
             random_observations_idxs = torch.randperm(torch.cat(observations).shape[0])
             random_observations = torch.cat(observations)[random_observations_idxs]
             future_observations = torch.where(
-                (
-                    torch.rand(size=(future_observations.shape[0],), device=self.device)
-                    < self._p_random_goal
-                ).unsqueeze(-1),
+                (torch.rand(size=(future_observations.shape[0],)) < self._p_random_goal).unsqueeze(-1),
                 random_observations,
                 future_observations,
             )
@@ -863,7 +865,6 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         observations = torch.as_tensor(
             episode["observation"][:-1],
             dtype=torch.float32,
-            device=self.device,
         )
         if observations.shape[0] == 0:
             return 0
@@ -871,27 +872,21 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         actions = torch.as_tensor(
             episode["action"][1:],
             dtype=torch.float32,
-            device=self.device,
         )
         rewards = torch.as_tensor(
             episode["reward"][1:],
             dtype=torch.float32,
-            device=self.device,
         )
         next_observations = torch.as_tensor(
             episode["observation"][1:],
             dtype=torch.float32,
-            device=self.device,
         )
         discounts = torch.as_tensor(
             episode["discount"][1:] * self._discount,
             dtype=torch.float32,
-            device=self.device,
         )
         physics = np.asarray(episode["physics"][:-1])
-        not_dones = torch.ones(
-            (observations.shape[0], 1), dtype=torch.float32, device=self.device
-        )
+        not_dones = torch.ones((observations.shape[0], 1), dtype=torch.float32)
         not_dones[-1] = 0.0
 
         future_idxs = np.arange(observations.shape[0]) + np.random.geometric(
@@ -901,12 +896,10 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         future_observations = torch.as_tensor(
             episode["observation"][:-1][future_idxs],
             dtype=torch.float32,
-            device=self.device,
         )
         future_goals = torch.as_tensor(
             episode["observation"][:-1][future_idxs],
             dtype=torch.float32,
-            device=self.device,
         )
 
         random_goal_idxs = np.random.randint(0, observations.shape[0], observations.shape[0])
@@ -924,16 +917,12 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         gciql_goals = torch.as_tensor(
             episode["observation"][:-1][gciql_goal_idxs],
             dtype=torch.float32,
-            device=self.device,
         )
 
         if self._p_random_goal > 0:
             random_observations = observations[torch.randperm(observations.shape[0])]
             future_observations = torch.where(
-                (
-                    torch.rand(size=(future_observations.shape[0],), device=self.device)
-                    < self._p_random_goal
-                ).unsqueeze(-1),
+                (torch.rand(size=(future_observations.shape[0],)) < self._p_random_goal).unsqueeze(-1),
                 random_observations,
                 future_observations,
             )
@@ -1043,16 +1032,34 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         )
 
         return Batch(
-            observations=self.storage["observations"][batch_indices],
-            actions=self.storage["actions"][batch_indices],
-            rewards=self.storage["rewards"][batch_indices],
-            next_observations=self.storage["next_observations"][batch_indices],
-            future_observations=self.storage["future_observations"][batch_indices],
-            discounts=self.storage["discounts"][batch_indices],
-            not_dones=self.storage["not_dones"][batch_indices],
+            observations=self.storage["observations"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            actions=self.storage["actions"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            rewards=self.storage["rewards"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            next_observations=self.storage["next_observations"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            future_observations=self.storage["future_observations"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            discounts=self.storage["discounts"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            not_dones=self.storage["not_dones"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
             physics=self.storage["physics"][batch_indices],
-            future_goals=self.storage["future_goals"][batch_indices],
-            gciql_goals=self.storage["gciql_goals"][batch_indices],
+            future_goals=self.storage["future_goals"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            gciql_goals=self.storage["gciql_goals"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
         )
 
     def add(self, *args, **kwargs):
@@ -1071,6 +1078,7 @@ class D4RLReplayBuffer(AbstractOfflineReplayBuffer):
         super().__init__(device=device, transitions=100000)
 
         self._discount = discount
+        self.storage_device = torch.device("cpu")
         self.storage = {}
 
         # load dataset on init
@@ -1135,22 +1143,22 @@ class D4RLReplayBuffer(AbstractOfflineReplayBuffer):
 
         # concatenate into storage
         self.storage["observations"] = torch.as_tensor(
-            np.array(observations), device=self.device
+            np.array(observations), dtype=torch.float32
         )
-        self.storage["actions"] = torch.as_tensor(np.array(actions), device=self.device)
-        self.storage["rewards"] = torch.as_tensor(np.array(rewards), device=self.device)
+        self.storage["actions"] = torch.as_tensor(np.array(actions), dtype=torch.float32)
+        self.storage["rewards"] = torch.as_tensor(np.array(rewards), dtype=torch.float32)
         self.storage["next_observations"] = torch.as_tensor(
-            np.array(next_observations), device=self.device
+            np.array(next_observations), dtype=torch.float32
         )
-        self.storage["goals"] = torch.as_tensor(np.array(goals), device=self.device)
+        self.storage["goals"] = torch.as_tensor(np.array(goals), dtype=torch.float32)
         self.storage["next_goals"] = torch.as_tensor(
-            np.array(next_goals), device=self.device
+            np.array(next_goals), dtype=torch.float32
         )
         self.storage["discounts"] = torch.as_tensor(
-            np.array(discounts), device=self.device, dtype=torch.float
+            np.array(discounts), dtype=torch.float32
         )
         self.storage["not_dones"] = torch.as_tensor(
-            np.array(not_dones), device=self.device
+            np.array(not_dones), dtype=torch.float32
         )
 
     def sample(self, batch_size: int) -> Batch:
@@ -1170,14 +1178,30 @@ class D4RLReplayBuffer(AbstractOfflineReplayBuffer):
         )  # TODO: make attribute of replay buffer
 
         return Batch(
-            observations=self.storage["observations"][batch_indices],
-            actions=self.storage["actions"][batch_indices],
-            rewards=self.storage["rewards"][batch_indices],
-            next_observations=self.storage["next_observations"][batch_indices],
-            discounts=self.storage["discounts"][batch_indices],
-            not_dones=self.storage["not_dones"][batch_indices],
-            goals=self.storage["goals"][batch_indices],
-            next_goals=self.storage["next_goals"][batch_indices],
+            observations=self.storage["observations"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            actions=self.storage["actions"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            rewards=self.storage["rewards"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            next_observations=self.storage["next_observations"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            discounts=self.storage["discounts"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            not_dones=self.storage["not_dones"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            goals=self.storage["goals"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
+            next_goals=self.storage["next_goals"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
         )
 
     def sample_task_inference_transitions(

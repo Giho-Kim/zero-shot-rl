@@ -51,8 +51,23 @@ class RewardFunctionConstructor:
                 f"rewards.{domain_name}.{task}"
             ).reward_function
 
+    @staticmethod
+    def _to_scalar_reward(value) -> float:
+        value = np.asarray(value, dtype=np.float32)
+        if value.ndim == 0:
+            return float(value)
+        if value.size == 1:
+            return float(value.reshape(-1)[0])
+        raise ValueError(f"Expected scalar reward, got shape {value.shape}.")
+
     def __call__(self, physics):
-        return [self.reward_functions[task](physics) for task in self.task_names]
+        return np.asarray(
+            [
+                self._to_scalar_reward(self.reward_functions[task](physics))
+                for task in self.task_names
+            ],
+            dtype=np.float32,
+        )
 
     def process_episode(
         self, episode: Dict[str, np.ndarray]
@@ -68,9 +83,10 @@ class RewardFunctionConstructor:
             observations.append(timestep.observation["observations"])
             rewards.append(self(self._env.physics))
 
+        rewards = np.asarray(rewards, dtype=np.float32)
         rewards_dict = {}
         for i, task in enumerate(self.task_names):
-            rewards_dict[task] = np.array(rewards)[:, i]
+            rewards_dict[task] = rewards[:, i]
 
         return np.array(observations), rewards_dict
 
@@ -94,12 +110,13 @@ class RewardFunctionConstructor:
         observations = torch.tensor(
             observations, dtype=torch.float32, device=self.device
         )
+        rewards = np.asarray(rewards, dtype=np.float32)
 
         rewards_dict = {}
         for i, task in enumerate(self.task_names):
             rewards_dict[task] = torch.tensor(
-                rewards, dtype=torch.float32, device=self.device
-            )[:, i].unsqueeze(-1)
+                rewards[:, i], dtype=torch.float32, device=self.device
+            ).unsqueeze(-1)
 
         return observations, rewards_dict
 

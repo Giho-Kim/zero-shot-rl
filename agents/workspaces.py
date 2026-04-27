@@ -267,7 +267,12 @@ class OfflineRLWorkspace(AbstractWorkspace):
 
     @staticmethod
     def _pack_scalar(value: float) -> np.ndarray:
+        if value is None:
+            value = 0.0
         return np.asarray([value], dtype=np.float32)
+
+    def _current_physics(self) -> np.ndarray:
+        return np.asarray(self.env.physics.state())
 
     def _rollout_collection_episode(
         self,
@@ -276,12 +281,13 @@ class OfflineRLWorkspace(AbstractWorkspace):
         step: int,
     ) -> Dict[str, np.ndarray]:
         timestep = self.env.reset()
+        action_spec = self.env.action_spec()
         episode = {
             "observation": [self._extract_observation(timestep)],
-            "action": [np.asarray(timestep.action, dtype=np.float32)],
+            "action": [np.zeros(action_spec.shape, dtype=np.float32)],
             "reward": [self._pack_scalar(timestep.reward)],
             "discount": [self._pack_scalar(timestep.discount)],
-            "physics": [np.asarray(timestep.physics)],
+            "physics": [self._current_physics()],
         }
 
         while not timestep.last():
@@ -303,10 +309,10 @@ class OfflineRLWorkspace(AbstractWorkspace):
 
             timestep = self.env.step(action)
             episode["observation"].append(self._extract_observation(timestep))
-            episode["action"].append(np.asarray(timestep.action, dtype=np.float32))
+            episode["action"].append(np.asarray(action, dtype=np.float32))
             episode["reward"].append(self._pack_scalar(timestep.reward))
             episode["discount"].append(self._pack_scalar(timestep.discount))
-            episode["physics"].append(np.asarray(timestep.physics))
+            episode["physics"].append(self._current_physics())
 
         return {
             "observation": np.asarray(episode["observation"], dtype=np.float32),

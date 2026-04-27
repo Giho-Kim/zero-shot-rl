@@ -191,7 +191,9 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
         # combine offline and online transitions
         observations = torch.cat(
             (
-                self.storage["observations"][offline_sample_indices],
+                self.storage["observations"][offline_sample_indices].to(
+                    self.device, non_blocking=True
+                ),
                 torch.as_tensor(
                     self.online_observations[online_sample_indices], device=self.device
                 ),
@@ -199,7 +201,9 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
         )
         next_observations = torch.cat(
             (
-                self.storage["next_observations"][offline_sample_indices],
+                self.storage["next_observations"][offline_sample_indices].to(
+                    self.device, non_blocking=True
+                ),
                 torch.as_tensor(
                     self.online_next_observations[online_sample_indices],
                     device=self.device,
@@ -208,7 +212,9 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
         )
         actions = torch.cat(
             (
-                self.storage["actions"][offline_sample_indices],
+                self.storage["actions"][offline_sample_indices].to(
+                    self.device, non_blocking=True
+                ),
                 torch.as_tensor(
                     self.online_actions[online_sample_indices], device=self.device
                 ),
@@ -216,7 +222,9 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
         )
         rewards = torch.cat(
             (
-                self.storage["rewards"][offline_sample_indices],
+                self.storage["rewards"][offline_sample_indices].to(
+                    self.device, non_blocking=True
+                ),
                 torch.as_tensor(
                     self.online_rewards[online_sample_indices], device=self.device
                 ),
@@ -224,7 +232,9 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
         )
         not_dones = torch.cat(
             (
-                self.storage["not_dones"][offline_sample_indices],
+                self.storage["not_dones"][offline_sample_indices].to(
+                    self.device, non_blocking=True
+                ),
                 torch.as_tensor(
                     self.online_not_dones[online_sample_indices], device=self.device
                 ),
@@ -232,7 +242,9 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
         )
         discounts = torch.cat(
             (
-                self.storage["discounts"][offline_sample_indices],
+                self.storage["discounts"][offline_sample_indices].to(
+                    self.device, non_blocking=True
+                ),
                 torch.as_tensor(
                     self.online_discounts[online_sample_indices], device=self.device
                 ),
