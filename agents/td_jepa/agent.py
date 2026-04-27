@@ -211,12 +211,18 @@ class TDJEPA(AbstractAgent):
 
     def update(self, batch: Batch, step: int) -> Dict[str, float]:
         init_obs = batch.observations.detach().cpu().numpy()
+        init_steps = None if batch.timesteps is None else batch.timesteps.detach().cpu().numpy()
         if self.agent.tilt is not None:
             progress = min(max(step, 0) / self.agent.cfg.train.learning_steps, 1.0)
             self.agent.tilt.temperature = self.agent.cfg.train.tilt_temperature_start + progress * (
                 self.agent.cfg.train.tilt_temperature_end - self.agent.cfg.train.tilt_temperature_start
             )
-        metrics = self.agent.update(_SingleBatchReplayBuffer(batch), step=step, init_obs=init_obs)
+        metrics = self.agent.update(
+            _SingleBatchReplayBuffer(batch),
+            step=step,
+            init_obs=init_obs,
+            init_steps=init_steps,
+        )
         return {key: float(value.detach().cpu()) for key, value in metrics.items()}
 
     def sample_z(self, size: int) -> torch.Tensor:

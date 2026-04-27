@@ -208,7 +208,7 @@ class TDJEPAAgent:
         psi_obs = phi_obs if self.cfg.model.symmetric else self._model._psi_rgb_encoder(obs)
         return phi_obs, phi_next_obs, psi_obs, psi_next_obs
 
-    def update(self, replay_buffer, step: int, init_obs=None) -> Dict[str, torch.Tensor]:
+    def update(self, replay_buffer, step: int, init_obs=None, init_steps=None) -> Dict[str, torch.Tensor]:
         batch = replay_buffer["train"].sample(self.cfg.train.batch_size)
 
         obs, action, next_obs, terminated = (
@@ -233,13 +233,17 @@ class TDJEPAAgent:
         if self.tilt is not None:
             if init_obs is None:
                 raise ValueError("TD-JEPA tilt requires init_obs during training.")
+            if init_steps is None:
+                raise ValueError("TD-JEPA tilt requires init_steps during training.")
             with torch.no_grad(), eval_mode(self._model._obs_normalizer):
                 init_obs = torch.as_tensor(init_obs, dtype=torch.float32, device=self.device)
+                init_steps = torch.as_tensor(init_steps, dtype=torch.long, device=self.device)
                 init_obs = self._model._obs_normalizer(init_obs)
                 init_obs = self._model._augmentator(init_obs)
                 phi_init_obs = self._model._phi_rgb_encoder(init_obs)
                 self.tilt.refresh(
                     init_features=phi_init_obs,
+                    init_timesteps=init_steps,
                     sample_z=lambda size: self._model.sample_z(size, device=self.device),
                     score_fn=lambda obs_features, z_candidates: self.score_and_grad(
                         phi_obs=obs_features,

@@ -18,6 +18,7 @@ class TiltLatentSelector:
     beta: float = 0.995
     temperature: float = 20.0
     candidate_multiplier: int = 10
+    init_geom_ratio: float = 0.5
 
     def __post_init__(self) -> None:
         dim = self.z.shape[-1]
@@ -28,6 +29,7 @@ class TiltLatentSelector:
     def refresh(
         self,
         init_features: torch.Tensor,
+        init_timesteps: torch.Tensor,
         sample_z: SampleZFn,
         score_fn: ScoreFn,
     ) -> torch.Tensor:
@@ -35,10 +37,17 @@ class TiltLatentSelector:
         n_candidates = self.candidate_multiplier * n
         z_candidates = sample_z(n_candidates)
 
-        obs_idx = torch.randint(
-            0, init_features.shape[0], (n_candidates,), device=init_features.device
+        init_timesteps = init_timesteps.to(
+            device=init_features.device, dtype=init_features.dtype
+        )
+        init_weights = torch.pow(self.init_geom_ratio, init_timesteps)
+        init_weights = init_weights / init_weights.sum()
+
+        obs_idx = torch.multinomial(
+            init_weights, num_samples=n_candidates, replacement=True
         )
         feature_candidates = init_features[obs_idx]
+        candidate_init_weights = init_weights[obs_idx]
 
         candidate_score, feature_stats = score_fn(feature_candidates, z_candidates)
         logits = candidate_score / self.temperature
@@ -46,7 +55,10 @@ class TiltLatentSelector:
         prob = torch.softmax(logits, dim=0)
         selected_idx = torch.multinomial(prob, num_samples=n, replacement=False)
 
-        gram_batch = feature_stats[selected_idx].T @ feature_stats[selected_idx] / n
+        selected_weights = candidate_init_weights[selected_idx]
+        selected_weights = selected_weights / selected_weights.sum()
+        weighted_features = feature_stats[selected_idx] * selected_weights.unsqueeze(-1)
+        gram_batch = feature_stats[selected_idx].T @ weighted_features
         self.gram.mul_(self.beta).add_((1 - self.beta) * gram_batch)
         self.z = z_candidates[selected_idx]
         return self.z

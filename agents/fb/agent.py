@@ -199,6 +199,7 @@ class FB(AbstractAgent):
             self.tilt.temperature = self._tilt_temperature(step)
             self.tilt.refresh(
                 init_features=batch.observations,
+                init_timesteps=batch.timesteps,
                 sample_z=lambda size: self.sample_z(size=size),
                 score_fn=lambda observations, z_candidates: self.score_and_features(
                     observations=observations,

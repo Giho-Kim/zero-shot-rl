@@ -533,6 +533,7 @@ class Batch:
     other_observations: Optional[torch.Tensor] = None
     future_observations: Optional[torch.Tensor] = None
     physics: Optional[torch.Tensor] = None
+    timesteps: Optional[torch.Tensor] = None
     goals: Optional[torch.Tensor] = None
     next_goals: Optional[torch.Tensor] = None
     future_goals: Optional[torch.Tensor] = None
@@ -700,6 +701,7 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         discounts = []
         not_dones = []
         physics = []
+        timesteps = []
 
         # load the episodes
         for _, episode in tqdm(episodes.items(), desc="Loading episodes from buffer"):
@@ -730,6 +732,9 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
                 )
             )
             physics.append(np.array(episode["physics"][:-1]))
+            timesteps.append(
+                torch.arange(len(episode["observation"]) - 1, dtype=torch.long)
+            )
             # hack the dones (we know last transition is terminal)
             not_done = torch.ones_like(torch.tensor(episode["reward"], dtype=torch.float32))
             not_done[-1] = 0
@@ -809,6 +814,7 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         self.storage["discounts"] = torch.cat(discounts)[sample_indices]
         self.storage["physics"] = np.concatenate(physics)[sample_indices]
         self.storage["not_dones"] = torch.cat(not_dones)[sample_indices]
+        self.storage["timesteps"] = torch.cat(timesteps)[sample_indices]
 
         # hilp future obs resampling
         # with probability self._random_goal we replace the future observation
@@ -847,6 +853,7 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
             self.storage["discounts"] = self.storage["discounts"][action_condition_idxs]
             self.storage["physics"] = self.storage["physics"][action_condition_idxs]
             self.storage["not_dones"] = self.storage["not_dones"][action_condition_idxs]
+            self.storage["timesteps"] = self.storage["timesteps"][action_condition_idxs]
 
     def add_episode(self, episode: Dict[str, np.ndarray]) -> int:
         """
@@ -886,6 +893,7 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
             dtype=torch.float32,
         )
         physics = np.asarray(episode["physics"][:-1])
+        timesteps = torch.arange(observations.shape[0], dtype=torch.long)
         not_dones = torch.ones((observations.shape[0], 1), dtype=torch.float32)
         not_dones[-1] = 0.0
 
@@ -943,6 +951,7 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
             next_observations = next_observations[keep_indices]
             discounts = discounts[keep_indices]
             physics = physics[keep_indices]
+            timesteps = timesteps[keep_indices]
             not_dones = not_dones[keep_indices]
             future_observations = future_observations[keep_indices]
             future_goals = future_goals[keep_indices]
@@ -958,6 +967,7 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
             "gciql_goals": gciql_goals,
             "discounts": discounts,
             "physics": physics,
+            "timesteps": timesteps,
             "not_dones": not_dones,
         }
 
@@ -1054,6 +1064,9 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
                 self.device, non_blocking=True
             ),
             physics=self.storage["physics"][batch_indices],
+            timesteps=self.storage["timesteps"][batch_indices].to(
+                self.device, non_blocking=True
+            ),
             future_goals=self.storage["future_goals"][batch_indices].to(
                 self.device, non_blocking=True
             ),

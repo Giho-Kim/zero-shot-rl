@@ -127,6 +127,8 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
         self.online_not_dones = np.empty((capacity, int(1)), dtype=np.float32)
 
         self.online_discounts = np.ones((capacity, int(1)), dtype=np.float32) * discount
+        self.online_timesteps = np.zeros((capacity,), dtype=np.int64)
+        self.current_episode_step = 0
 
         self.current_memory_index = int(0)
         self.full_memory = False
@@ -162,10 +164,15 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
         np.copyto(self.online_actions[self.current_memory_index], action)
         np.copyto(self.online_rewards[self.current_memory_index], reward)
         np.copyto(self.online_not_dones[self.current_memory_index], not done)
+        self.online_timesteps[self.current_memory_index] = self.current_episode_step
 
         # update index
         self.current_memory_index = int((self.current_memory_index + 1) % self.capacity)
         self.full_memory = self.full_memory or self.current_memory_index == 0
+        if np.asarray(done).item():
+            self.current_episode_step = 0
+        else:
+            self.current_episode_step += 1
 
     def sample(self, batch_size: int):
         """
@@ -250,6 +257,16 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
                 ),
             ),
         )
+        timesteps = torch.cat(
+            (
+                self.storage["timesteps"][offline_sample_indices].to(
+                    self.device, non_blocking=True
+                ),
+                torch.as_tensor(
+                    self.online_timesteps[online_sample_indices], device=self.device
+                ),
+            ),
+        )
 
         return Batch(
             observations=observations,
@@ -258,4 +275,5 @@ class OnlineFBReplayBuffer(FBReplayBuffer):
             next_observations=next_observations,
             not_dones=not_dones,
             discounts=discounts,
+            timesteps=timesteps,
         )
