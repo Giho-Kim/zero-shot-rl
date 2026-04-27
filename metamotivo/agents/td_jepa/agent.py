@@ -321,10 +321,8 @@ class TDJEPAAgent:
             identity = torch.eye(v_metric.shape[-1], device=v_metric.device, dtype=v_metric.dtype)
             ginv = torch.linalg.pinv(self.tilt.gram + lam * identity)
 
-        vg = v_metric @ ginv
-        score = torch.sum(vg * v_metric, dim=1)
-        num_parallel = target_phi_predictors.shape[0]
-        score = score.view(num_parallel, z.shape[0]).mean(dim=0)
+        zg = z @ ginv
+        score = torch.sum(zg * z, dim=1)
         return score, v_metric
 
     def sample_action_from_latent(self, latent: torch.Tensor, z: torch.Tensor, mean: bool = False) -> torch.Tensor:

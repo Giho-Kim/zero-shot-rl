@@ -285,8 +285,8 @@ class FB(AbstractAgent):
             features.shape[-1], device=features.device, dtype=features.dtype
         )
         ginv = torch.linalg.pinv(self.tilt.gram + lam * identity)
-        projected = features @ ginv
-        score = torch.sum(projected * features, dim=1)
+        projected = z @ ginv
+        score = torch.sum(projected * z, dim=1)
         return score, features
 
     def update_fb(
