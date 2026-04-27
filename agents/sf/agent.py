@@ -433,6 +433,43 @@ class SF(AbstractAgent):
         """Loads model."""
         pass
 
+    @torch.no_grad()
+    def sample_z(self, size: int) -> torch.Tensor:
+        """Public wrapper for sampling training latents."""
+        return self._sample_z(size=size)
+
+    @torch.no_grad()
+    def sample_mixed_z(
+        self, next_observations: Optional[torch.Tensor] = None, size: Optional[int] = None
+    ) -> torch.Tensor:
+        """Samples z from the same distribution used during training."""
+        sample_size = size if size is not None else self.batch_size
+        zs = self._sample_z(size=sample_size)
+
+        if self._z_mix_ratio > 0 and next_observations is not None:
+            phi_input = next_observations
+            with torch.no_grad():
+                phi = self.feature_net.forward(phi_input)
+
+            cov = torch.matmul(phi.T, phi) / phi.shape[0]
+            inv_cov = torch.linalg.pinv(cov)
+
+            mix_idxs = np.where(
+                np.random.uniform(size=sample_size) < self._z_mix_ratio
+            )[0]
+
+            if len(mix_idxs) > 0:
+                with torch.no_grad():
+                    new_z = phi[mix_idxs]
+
+                new_z = torch.matmul(new_z, inv_cov)
+                new_z = math.sqrt(self._z_dimension) * torch.nn.functional.normalize(
+                    new_z, dim=1
+                )
+                zs[mix_idxs] = new_z
+
+        return zs
+
     def _sample_z(self, size: int) -> torch.Tensor:
         """Samples z in the sphere of radius sqrt(D)."""
         gaussian_random_variable = torch.randn(

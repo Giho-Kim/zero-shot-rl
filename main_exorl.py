@@ -46,6 +46,8 @@ parser.add_argument("--dataset_transitions", type=int, default=100000)
 parser.add_argument("--eval_tasks", nargs="+", required=True)
 parser.add_argument("--learning_steps", type=int, default=1000000)
 parser.add_argument("--z_inference_steps", type=int, default=10000)
+parser.add_argument("--collection_interval", type=int, default=0)
+parser.add_argument("--collection_episodes", type=int, default=0)
 parser.add_argument("--run_name", type=str, default=None)
 parser.add_argument("--model_name", type=str, default=None)
 parser.add_argument("--lagrange", type=str, default="True")
@@ -130,6 +132,13 @@ config["device"] = torch.device(
     if torch.cuda.is_available()
     else ("mps" if torch.backends.mps.is_built() else "cpu")
 )
+
+if config["collection_interval"] < 0 or config["collection_episodes"] < 0:
+    raise ValueError("collection_interval and collection_episodes must be >= 0.")
+if (config["collection_interval"] == 0) != (config["collection_episodes"] == 0):
+    raise ValueError(
+        "collection_interval and collection_episodes must both be set, or both be 0."
+    )
 
 set_seed_everywhere(config["seed"])
 
@@ -564,6 +573,8 @@ workspace = OfflineRLWorkspace(
     eval_std=eval_std,
     wandb_logging=config["wandb_logging"],
     device=config["device"],
+    collection_interval=config["collection_interval"],
+    collection_episodes=config["collection_episodes"],
 )
 
 if __name__ == "__main__":

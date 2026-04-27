@@ -649,6 +649,10 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         self._p_traj_goal = p_traj_goal
         self._p_currgoal_goal = p_currgoal_goal
         self._future = future
+        self._reward_constructor = reward_constructor
+        self._task = task
+        self._relabel = relabel
+        self._action_condition = action_condition
         self.storage = {}
 
         # load dataset on init
@@ -841,6 +845,151 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
             self.storage["discounts"] = self.storage["discounts"][action_condition_idxs]
             self.storage["physics"] = self.storage["physics"][action_condition_idxs]
             self.storage["not_dones"] = self.storage["not_dones"][action_condition_idxs]
+
+    def add_episode(self, episode: Dict[str, np.ndarray]) -> int:
+        """
+        Add a newly collected episode to the replay buffer using the same
+        episode-level schema as the offline dataset.
+        """
+
+        episode = deepcopy(episode)
+        if self._relabel:
+            episode = self._relabel_episode(
+                reward_constructor=self._reward_constructor,
+                episode=episode,
+                task=self._task,
+            )
+
+        observations = torch.as_tensor(
+            episode["observation"][:-1],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if observations.shape[0] == 0:
+            return 0
+
+        actions = torch.as_tensor(
+            episode["action"][1:],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        rewards = torch.as_tensor(
+            episode["reward"][1:],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        next_observations = torch.as_tensor(
+            episode["observation"][1:],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        discounts = torch.as_tensor(
+            episode["discount"][1:] * self._discount,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        physics = np.asarray(episode["physics"][:-1])
+        not_dones = torch.ones(
+            (observations.shape[0], 1), dtype=torch.float32, device=self.device
+        )
+        not_dones[-1] = 0.0
+
+        future_idxs = np.arange(observations.shape[0]) + np.random.geometric(
+            p=(1 - self._future), size=observations.shape[0]
+        )
+        future_idxs = np.clip(future_idxs, 0, observations.shape[0] - 1)
+        future_observations = torch.as_tensor(
+            episode["observation"][:-1][future_idxs],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        future_goals = torch.as_tensor(
+            episode["observation"][:-1][future_idxs],
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+        random_goal_idxs = np.random.randint(0, observations.shape[0], observations.shape[0])
+        current_goal_idxs = np.arange(observations.shape[0])
+        probs = np.random.random(observations.shape[0])
+        gciql_goal_idxs = np.where(
+            probs < self._p_traj_goal,
+            future_idxs,
+            np.where(
+                probs < (self._p_traj_goal + self._p_random_goal),
+                random_goal_idxs,
+                current_goal_idxs,
+            ),
+        )
+        gciql_goals = torch.as_tensor(
+            episode["observation"][:-1][gciql_goal_idxs],
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+        if self._p_random_goal > 0:
+            random_observations = observations[torch.randperm(observations.shape[0])]
+            future_observations = torch.where(
+                (
+                    torch.rand(size=(future_observations.shape[0],), device=self.device)
+                    < self._p_random_goal
+                ).unsqueeze(-1),
+                random_observations,
+                future_observations,
+            )
+
+        if self._action_condition is not None:
+            for key, value in self._action_condition.items():
+                keep_indices = (
+                    torch.where(actions[:, key] > value)[0].detach().cpu().numpy()
+                )
+                break
+
+            if len(keep_indices) == 0:
+                return 0
+
+            observations = observations[keep_indices]
+            actions = actions[keep_indices]
+            rewards = rewards[keep_indices]
+            next_observations = next_observations[keep_indices]
+            discounts = discounts[keep_indices]
+            physics = physics[keep_indices]
+            not_dones = not_dones[keep_indices]
+            future_observations = future_observations[keep_indices]
+            future_goals = future_goals[keep_indices]
+            gciql_goals = gciql_goals[keep_indices]
+
+        new_storage = {
+            "observations": observations,
+            "actions": actions,
+            "rewards": rewards,
+            "next_observations": next_observations,
+            "future_observations": future_observations,
+            "future_goals": future_goals,
+            "gciql_goals": gciql_goals,
+            "discounts": discounts,
+            "physics": physics,
+            "not_dones": not_dones,
+        }
+
+        for key, value in new_storage.items():
+            if key not in self.storage:
+                self.storage[key] = value
+            elif key == "physics":
+                self.storage[key] = np.concatenate((self.storage[key], value), axis=0)
+            else:
+                self.storage[key] = torch.cat((self.storage[key], value), dim=0)
+
+        return int(observations.shape[0])
+
+    def add_episodes(self, episodes: List[Dict[str, np.ndarray]]) -> int:
+        """Add multiple collected episodes and return the number of transitions."""
+
+        transitions_added = 0
+        for episode in episodes:
+            transitions_added += self.add_episode(episode)
+
+        return transitions_added
 
     @staticmethod
     def _relabel_episode(

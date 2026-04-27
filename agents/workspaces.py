@@ -47,6 +47,8 @@ class OfflineRLWorkspace(AbstractWorkspace):
         z_inference_steps: Optional[int] = None,  # FB only
         train_std: Optional[float] = None,  # FB only
         eval_std: Optional[float] = None,  # FB only
+        collection_interval: int = 0,
+        collection_episodes: int = 0,
     ):
         super().__init__(
             env=reward_constructor._env,
@@ -65,10 +67,12 @@ class OfflineRLWorkspace(AbstractWorkspace):
         self.wandb_logging = wandb_logging
         self.domain_name = reward_constructor.domain_name
         self.device = device
+        self.collection_interval = collection_interval
+        self.collection_episodes = collection_episodes
 
     def train(
         self,
-        agent: Union[CQL, FB, CFB, GCIQL, TDJEPA],
+        agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
         tasks: List[str],
         agent_config: Dict,
         replay_buffer: Union[OfflineReplayBuffer, FBReplayBuffer],
@@ -116,6 +120,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
             train_metrics = agent.update(batch=batch, step=i)
 
             eval_metrics = {}
+            collection_metrics = {}
 
             if i % self.eval_frequency == 0:
                 eval_metrics = self.eval(agent=agent, tasks=tasks)
@@ -139,7 +144,20 @@ class OfflineRLWorkspace(AbstractWorkspace):
 
                 agent.train()
 
-            metrics = {**train_metrics, **eval_metrics}
+            if (
+                self.collection_interval > 0
+                and self.collection_episodes > 0
+                and i > 0
+                and i % self.collection_interval == 0
+            ):
+                collection_metrics = self.collect_training_episodes(
+                    agent=agent,
+                    tasks=tasks,
+                    replay_buffer=replay_buffer,
+                    step=i,
+                )
+
+            metrics = {**train_metrics, **eval_metrics, **collection_metrics}
 
             if self.wandb_logging:
                 run.log(metrics)
@@ -154,7 +172,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
 
     def eval(
         self,
-        agent: Union[CQL, FB, CFB, TDJEPA],
+        agent: Union[CQL, FB, CFB, SF, TDJEPA],
         tasks: List[str],
     ) -> Dict[str, float]:
         """
@@ -235,10 +253,143 @@ class OfflineRLWorkspace(AbstractWorkspace):
         # log mean task performance
         metrics["eval/task_reward_iqm"] = mean_task_performance / len(tasks)
 
-        if isinstance(agent, FB):
+        if hasattr(agent, "std_dev_schedule") and self.train_std is not None:
             agent.std_dev_schedule = self.train_std
 
         return metrics
+
+    @staticmethod
+    def _extract_observation(timestep) -> np.ndarray:
+        observation = timestep.observation
+        if isinstance(observation, dict):
+            observation = observation["observations"]
+        return np.asarray(observation, dtype=np.float32)
+
+    @staticmethod
+    def _pack_scalar(value: float) -> np.ndarray:
+        return np.asarray([value], dtype=np.float32)
+
+    def _rollout_collection_episode(
+        self,
+        agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
+        condition: Optional[np.ndarray],
+        step: int,
+    ) -> Dict[str, np.ndarray]:
+        timestep = self.env.reset()
+        episode = {
+            "observation": [self._extract_observation(timestep)],
+            "action": [np.asarray(timestep.action, dtype=np.float32)],
+            "reward": [self._pack_scalar(timestep.reward)],
+            "discount": [self._pack_scalar(timestep.discount)],
+            "physics": [np.asarray(timestep.physics)],
+        }
+
+        while not timestep.last():
+            observation = self._extract_observation(timestep)
+
+            if isinstance(agent, (FB, GCIQL, SF, TDJEPA)):
+                action, _ = agent.act(
+                    observation,
+                    task=condition,
+                    step=step,
+                    sample=True,
+                )
+            else:
+                action = agent.act(
+                    observation=observation,
+                    sample=True,
+                    step=step,
+                )
+
+            timestep = self.env.step(action)
+            episode["observation"].append(self._extract_observation(timestep))
+            episode["action"].append(np.asarray(timestep.action, dtype=np.float32))
+            episode["reward"].append(self._pack_scalar(timestep.reward))
+            episode["discount"].append(self._pack_scalar(timestep.discount))
+            episode["physics"].append(np.asarray(timestep.physics))
+
+        return {
+            "observation": np.asarray(episode["observation"], dtype=np.float32),
+            "action": np.asarray(episode["action"], dtype=np.float32),
+            "reward": np.asarray(episode["reward"], dtype=np.float32),
+            "discount": np.asarray(episode["discount"], dtype=np.float32),
+            "physics": np.asarray(episode["physics"]),
+        }
+
+    def _sample_training_condition(
+        self,
+        agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
+        replay_buffer: Union[OfflineReplayBuffer, FBReplayBuffer],
+    ) -> Optional[np.ndarray]:
+        if isinstance(agent, FB):
+            batch = replay_buffer.sample(agent.batch_size)
+            z = agent.sample_mixed_z(train_goal=batch.observations)[0]
+            return z.detach().cpu().numpy()
+
+        if isinstance(agent, SF):
+            batch = replay_buffer.sample(agent.batch_size)
+            z = agent.sample_mixed_z(next_observations=batch.next_observations)[0]
+            return z.detach().cpu().numpy()
+
+        if isinstance(agent, TDJEPA):
+            z = agent.sample_z(size=1)[0]
+            return z.detach().cpu().numpy()
+
+        if isinstance(agent, GCIQL):
+            batch = replay_buffer.sample(1)
+            goal = batch.gciql_goals[0]
+            return goal.detach().cpu().numpy()
+
+        return None
+
+    def collect_training_episodes(
+        self,
+        agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
+        tasks: List[str],
+        replay_buffer: Union[OfflineReplayBuffer, FBReplayBuffer],
+        step: int,
+    ) -> Dict[str, float]:
+        logger.info(
+            f"Collecting {self.collection_episodes} episode(s) at training step {step}."
+        )
+
+        agent.eval()
+        if hasattr(agent, "std_dev_schedule") and self.train_std is not None:
+            agent.std_dev_schedule = self.train_std
+        episodes = []
+        for _ in range(self.collection_episodes):
+            condition = self._sample_training_condition(
+                agent=agent,
+                replay_buffer=replay_buffer,
+            )
+            episodes.append(
+                self._rollout_collection_episode(
+                    agent=agent,
+                    condition=condition,
+                    step=step,
+                )
+            )
+
+        transitions_added = replay_buffer.add_episodes(episodes)
+
+        if (
+            isinstance(agent, (FB, SF, GCIQL, TDJEPA))
+            and self.domain_name != "point_mass_maze"
+        ):
+            (
+                self.observations_z,
+                self.rewards_z,
+            ) = replay_buffer.sample_task_inference_transitions(
+                inference_steps=self.z_inference_steps
+            )
+
+        agent.train()
+
+        return {
+            "collection/episodes": float(len(episodes)),
+            "collection/transitions": float(transitions_added),
+            "collection/buffer_size": float(len(replay_buffer.storage["observations"])),
+        }
 
 
 class FinetuningWorkspace(OfflineRLWorkspace):
