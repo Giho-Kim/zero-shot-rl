@@ -30,6 +30,7 @@ parser.add_argument("algorithm", type=str)
 parser.add_argument("domain_name", type=str)
 parser.add_argument("exploration_algorithm", type=str)
 parser.add_argument("--tilt", action="store_true")
+parser.add_argument("--tilting_by_z", action="store_true")
 parser.add_argument("--tilt_temperature", type=float)
 parser.add_argument("--tilt_temperature_start", type=float)
 parser.add_argument("--tilt_temperature_end", type=float)
@@ -299,6 +300,7 @@ elif config["algorithm"] == "td_jepa":
         scale_train_goals=config["scale_train_goals"],
         learning_steps=config["learning_steps"],
         tilt=config["tilt"],
+        tilting_by_z=config["tilting_by_z"],
         tilt_beta=config["tilt_beta"],
         tilt_temperature=config["tilt_temperature"],
         tilt_temperature_start=config["tilt_temperature_start"],
@@ -384,6 +386,7 @@ elif config["algorithm"] == "fb":
         tau=config["tau"],
         learning_steps=config["learning_steps"],
         tilt=config["tilt"],
+        tilting_by_z=config["tilting_by_z"],
         tilt_beta=config["tilt_beta"],
         tilt_temperature=config["tilt_temperature"],
         tilt_temperature_start=config["tilt_temperature_start"],

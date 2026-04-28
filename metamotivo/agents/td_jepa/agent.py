@@ -41,6 +41,7 @@ class TDJEPAAgentTrainConfig(BaseConfig):
     scale_train_goals: bool = False
     learning_steps: int = 1_000_000
     tilt: bool = False
+    tilting_by_z: bool = False
     tilt_beta: float = 0.995
     tilt_temperature: float = 20.0
     tilt_temperature_start: float = 20.0
@@ -325,8 +326,9 @@ class TDJEPAAgent:
             identity = torch.eye(v_metric.shape[-1], device=v_metric.device, dtype=v_metric.dtype)
             ginv = torch.linalg.pinv(self.tilt.gram + lam * identity)
 
-        zg = z @ ginv
-        score = torch.sum(zg * z, dim=1)
+        query = z if self.cfg.train.tilting_by_z else v_metric
+        qg = query @ ginv
+        score = torch.sum(qg * query, dim=1)
         return score, v_metric
 
     def sample_action_from_latent(self, latent: torch.Tensor, z: torch.Tensor, mean: bool = False) -> torch.Tensor:

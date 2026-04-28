@@ -48,6 +48,7 @@ class FB(AbstractAgent):
         tau: float,
         learning_steps: int,
         tilt: bool,
+        tilting_by_z: bool,
         tilt_beta: float,
         tilt_temperature: float,
         tilt_temperature_start: float,
@@ -133,6 +134,7 @@ class FB(AbstractAgent):
         self._learning_steps = max(1, learning_steps)
         self._tilt_temperature_start = tilt_temperature_start
         self._tilt_temperature_end = tilt_temperature_end
+        self._tilting_by_z = tilting_by_z
         self.std_dev_schedule = std_dev_schedule
         self.tilt = None
         if tilt:
@@ -286,8 +288,9 @@ class FB(AbstractAgent):
             features.shape[-1], device=features.device, dtype=features.dtype
         )
         ginv = torch.linalg.pinv(self.tilt.gram + lam * identity)
-        projected = z @ ginv
-        score = torch.sum(projected * z, dim=1)
+        query = z if self._tilting_by_z else features
+        projected = query @ ginv
+        score = torch.sum(projected * query, dim=1)
         return score, features
 
     def update_fb(
