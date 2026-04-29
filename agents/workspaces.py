@@ -328,6 +328,14 @@ class OfflineRLWorkspace(AbstractWorkspace):
         replay_buffer: Union[OfflineReplayBuffer, FBReplayBuffer],
     ) -> Optional[np.ndarray]:
         if isinstance(agent, FB):
+            if agent.tilt is not None:
+                idx = torch.randint(
+                    agent.tilt.z.shape[0],
+                    (1,),
+                    device=agent.tilt.z.device,
+                )
+                z = agent.tilt.z[idx[0]]
+                return z.detach().cpu().numpy()
             batch = replay_buffer.sample(agent.batch_size)
             z = agent.sample_mixed_z(train_goal=batch.observations)[0]
             return z.detach().cpu().numpy()
@@ -338,6 +346,14 @@ class OfflineRLWorkspace(AbstractWorkspace):
             return z.detach().cpu().numpy()
 
         if isinstance(agent, TDJEPA):
+            if agent.agent.tilt is not None:
+                idx = torch.randint(
+                    agent.agent.tilt.z.shape[0],
+                    (1,),
+                    device=agent.agent.tilt.z.device,
+                )
+                z = agent.agent.tilt.z[idx[0]]
+                return z.detach().cpu().numpy()
             z = agent.sample_z(size=1)[0]
             return z.detach().cpu().numpy()
 
