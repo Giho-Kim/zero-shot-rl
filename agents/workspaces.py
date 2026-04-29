@@ -34,6 +34,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
     """
     Trains/evals/rollouts an offline RL agent given
     """
+    COLLECTION_TILT_TEMPERATURE = 5.0
 
     def __init__(
         self,
@@ -159,7 +160,9 @@ class OfflineRLWorkspace(AbstractWorkspace):
 
             metrics = {**train_metrics, **eval_metrics, **collection_metrics}
 
-            if self.wandb_logging:
+            if self.wandb_logging and (
+                i % self.eval_frequency == 0 or bool(collection_metrics)
+            ):
                 run.log(metrics)
 
         if self.wandb_logging:
@@ -271,6 +274,13 @@ class OfflineRLWorkspace(AbstractWorkspace):
             value = 0.0
         return np.asarray([value], dtype=np.float32)
 
+    def _pack_task_rewards(self) -> np.ndarray:
+        rewards = []
+        for reward_fn in self.reward_functions.values():
+            reward = np.asarray(reward_fn(self.env.physics), dtype=np.float32)
+            rewards.append(float(reward.reshape(-1)[0]))
+        return np.asarray(rewards, dtype=np.float32)
+
     def _current_physics(self) -> np.ndarray:
         return np.asarray(self.env.physics.state())
 
@@ -285,7 +295,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
         episode = {
             "observation": [self._extract_observation(timestep)],
             "action": [np.zeros(action_spec.shape, dtype=np.float32)],
-            "reward": [self._pack_scalar(timestep.reward)],
+            "reward": [self._pack_task_rewards()],
             "discount": [self._pack_scalar(timestep.discount)],
             "physics": [self._current_physics()],
         }
@@ -310,7 +320,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
             timestep = self.env.step(action)
             episode["observation"].append(self._extract_observation(timestep))
             episode["action"].append(np.asarray(action, dtype=np.float32))
-            episode["reward"].append(self._pack_scalar(timestep.reward))
+            episode["reward"].append(self._pack_task_rewards())
             episode["discount"].append(self._pack_scalar(timestep.discount))
             episode["physics"].append(self._current_physics())
 
@@ -322,10 +332,37 @@ class OfflineRLWorkspace(AbstractWorkspace):
             "physics": np.asarray(episode["physics"]),
         }
 
+    def _refresh_collection_tilt(
+        self,
+        agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
+        replay_buffer: Union[OfflineReplayBuffer, FBReplayBuffer],
+        step: int,
+    ) -> None:
+        if not isinstance(agent, FB) or agent.tilt is None:
+            return
+
+        previous_temperature = agent.tilt.temperature
+        batch = replay_buffer.sample(agent.batch_size)
+        try:
+            agent.tilt.temperature = self.COLLECTION_TILT_TEMPERATURE
+            agent.tilt.refresh(
+                init_features=batch.observations,
+                init_timesteps=batch.timesteps,
+                sample_z=lambda size: agent.sample_z(size=size),
+                score_fn=lambda observations, z_candidates: agent.score_and_features(
+                    observations=observations,
+                    z=z_candidates,
+                    step=step,
+                ),
+            )
+        finally:
+            agent.tilt.temperature = previous_temperature
+
     def _sample_training_condition(
         self,
         agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
         replay_buffer: Union[OfflineReplayBuffer, FBReplayBuffer],
+        step: int,
     ) -> Optional[np.ndarray]:
         if isinstance(agent, FB):
             if agent.tilt is not None:
@@ -378,11 +415,17 @@ class OfflineRLWorkspace(AbstractWorkspace):
         agent.eval()
         if hasattr(agent, "std_dev_schedule") and self.train_std is not None:
             agent.std_dev_schedule = self.train_std
+        self._refresh_collection_tilt(
+            agent=agent,
+            replay_buffer=replay_buffer,
+            step=step,
+        )
         episodes = []
         for _ in range(self.collection_episodes):
             condition = self._sample_training_condition(
                 agent=agent,
                 replay_buffer=replay_buffer,
+                step=step,
             )
             episodes.append(
                 self._rollout_collection_episode(
