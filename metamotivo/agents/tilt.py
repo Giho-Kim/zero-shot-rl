@@ -18,7 +18,7 @@ class TiltLatentSelector:
     beta: float = 0.995
     temperature: float = 20.0
     candidate_multiplier: int = 10
-    init_geom_ratio: float = 0.5
+    init_geom_ratio: float = 0.9
 
     def __post_init__(self) -> None:
         dim = self.z.shape[-1]

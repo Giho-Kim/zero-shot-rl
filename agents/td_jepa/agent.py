@@ -78,6 +78,7 @@ class TDJEPA(AbstractAgent):
         tilt_temperature_start: float,
         tilt_temperature_end: float,
         tilt_candidate_multiplier: int,
+        tilt_init_geom_ratio: float,
         actor_std: float,
         actor_use_full_encoder: bool,
         symmetric: bool,
@@ -193,6 +194,7 @@ class TDJEPA(AbstractAgent):
             tilt_temperature_start=tilt_temperature_start,
             tilt_temperature_end=tilt_temperature_end,
             tilt_candidate_multiplier=tilt_candidate_multiplier,
+            tilt_init_geom_ratio=tilt_init_geom_ratio,
         )
         cfg = TDJEPAAgentConfig(model=model_cfg, train=train_cfg, compile=compile)
         self.agent = MetaTDJEPAAgent(obs_space=self._obs_space, action_dim=action_length, cfg=cfg)

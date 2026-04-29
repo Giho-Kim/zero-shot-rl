@@ -25,6 +25,7 @@ parser.add_argument("domain_name", type=str)
 parser.add_argument("dataset", type=str)
 parser.add_argument("--tilt", action="store_true")
 parser.add_argument("--tilt_temperature", type=float)
+parser.add_argument("--tilt_init_geom_ratio", type=float)
 parser.add_argument(
     "--wandb_logging", default=True, action=argparse.BooleanOptionalAction
 )
@@ -78,9 +79,15 @@ time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
 cli_args = vars(args).copy()
 tilt_temperature_override = cli_args.pop("tilt_temperature", None)
+tilt_init_geom_ratio_override = cli_args.pop("tilt_init_geom_ratio", None)
 config.update(cli_args)
 if tilt_temperature_override is not None:
     config["tilt_temperature"] = tilt_temperature_override
+if tilt_init_geom_ratio_override is not None:
+    config["tilt_init_geom_ratio"] = tilt_init_geom_ratio_override
+
+if "tilt_init_geom_ratio" not in config:
+    config["tilt_init_geom_ratio"] = 0.9
 
 if config["device"] is None:
     config["device"] = torch.device(
@@ -180,10 +187,15 @@ elif config["algorithm"] == "fb":
         std_dev_clip=config["std_dev_clip"],
         std_dev_schedule=config["std_dev_schedule"],
         tau=config["tau"],
+        learning_steps=config["learning_steps"],
         tilt=config["tilt"],
+        tilting_by_z=config.get("tilting_by_z", False),
         tilt_beta=config["tilt_beta"],
         tilt_temperature=config["tilt_temperature"],
+        tilt_temperature_start=config.get("tilt_temperature_start", config["tilt_temperature"]),
+        tilt_temperature_end=config.get("tilt_temperature_end", config["tilt_temperature"]),
         tilt_candidate_multiplier=config["tilt_candidate_multiplier"],
+        tilt_init_geom_ratio=config["tilt_init_geom_ratio"],
         device=config["device"],
         name=config["name"],
     )
@@ -216,10 +228,15 @@ elif config["algorithm"] == "td_jepa":
         bc_coeff=config["bc_coeff"],
         log_eigvals=config["log_eigvals"],
         scale_train_goals=config["scale_train_goals"],
+        learning_steps=config["learning_steps"],
         tilt=config["tilt"],
+        tilting_by_z=config.get("tilting_by_z", False),
         tilt_beta=config["tilt_beta"],
         tilt_temperature=config["tilt_temperature"],
+        tilt_temperature_start=config.get("tilt_temperature_start", config["tilt_temperature"]),
+        tilt_temperature_end=config.get("tilt_temperature_end", config["tilt_temperature"]),
         tilt_candidate_multiplier=config["tilt_candidate_multiplier"],
+        tilt_init_geom_ratio=config["tilt_init_geom_ratio"],
         actor_std=config["actor_std"],
         actor_use_full_encoder=config["actor_use_full_encoder"],
         symmetric=config["symmetric"],

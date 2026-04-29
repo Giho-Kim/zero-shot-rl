@@ -54,6 +54,7 @@ class FB(AbstractAgent):
         tilt_temperature_start: float,
         tilt_temperature_end: float,
         tilt_candidate_multiplier: int,
+        tilt_init_geom_ratio: float,
         device: torch.device,
         name: str,
     ):
@@ -143,6 +144,7 @@ class FB(AbstractAgent):
                 beta=tilt_beta,
                 temperature=tilt_temperature,
                 candidate_multiplier=tilt_candidate_multiplier,
+                init_geom_ratio=tilt_init_geom_ratio,
             )
 
     def _tilt_temperature(self, step: int) -> float:

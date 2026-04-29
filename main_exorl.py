@@ -34,6 +34,7 @@ parser.add_argument("--tilting_by_z", action="store_true")
 parser.add_argument("--tilt_temperature", type=float)
 parser.add_argument("--tilt_temperature_start", type=float)
 parser.add_argument("--tilt_temperature_end", type=float)
+parser.add_argument("--tilt_init_geom_ratio", type=float)
 parser.add_argument("--wandb_logging", type=str, default="True")
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--alpha", type=float, default=0.01)
@@ -101,7 +102,7 @@ elif args.algorithm == "td_jepa":
     model_dir = working_dir / "agents" / args.algorithm / "saved_models"
 else:
     config_path = working_dir / "agents" / args.algorithm / "config.yaml"
-    model_dir = working_dir / "agents" / args.algorithm / "saved_models"
+    model_dir = working_dir / "agents" / algo_dir / "saved_models" if 'algo_dir' in locals() else working_dir / "agents" / args.algorithm / "saved_models"
 
 time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
@@ -113,11 +114,14 @@ cli_args = vars(args).copy()
 tilt_temperature_override = cli_args.pop("tilt_temperature", None)
 tilt_temperature_start_override = cli_args.pop("tilt_temperature_start", None)
 tilt_temperature_end_override = cli_args.pop("tilt_temperature_end", None)
+tilt_init_geom_ratio_override = cli_args.pop("tilt_init_geom_ratio", None)
 config.update(cli_args)
 if tilt_temperature_start_override is not None:
     config["tilt_temperature_start"] = tilt_temperature_start_override
 if tilt_temperature_end_override is not None:
     config["tilt_temperature_end"] = tilt_temperature_end_override
+if tilt_init_geom_ratio_override is not None:
+    config["tilt_init_geom_ratio"] = tilt_init_geom_ratio_override
 if (
     tilt_temperature_override is not None
     and tilt_temperature_start_override is None
@@ -128,6 +132,10 @@ if (
     config["tilt_temperature_end"] = tilt_temperature_override
 elif tilt_temperature_override is not None:
     config["tilt_temperature"] = tilt_temperature_override
+
+if "tilt_init_geom_ratio" not in config:
+    config["tilt_init_geom_ratio"] = 0.9
+
 config["device"] = torch.device(
     "cuda"
     if torch.cuda.is_available()
@@ -306,6 +314,7 @@ elif config["algorithm"] == "td_jepa":
         tilt_temperature_start=config["tilt_temperature_start"],
         tilt_temperature_end=config["tilt_temperature_end"],
         tilt_candidate_multiplier=config["tilt_candidate_multiplier"],
+        tilt_init_geom_ratio=config["tilt_init_geom_ratio"],
         actor_std=config["actor_std"],
         actor_use_full_encoder=config["actor_use_full_encoder"],
         symmetric=config["symmetric"],
@@ -392,6 +401,7 @@ elif config["algorithm"] == "fb":
         tilt_temperature_start=config["tilt_temperature_start"],
         tilt_temperature_end=config["tilt_temperature_end"],
         tilt_candidate_multiplier=config["tilt_candidate_multiplier"],
+        tilt_init_geom_ratio=config["tilt_init_geom_ratio"],
         device=config["device"],
         name=config["name"],
     )

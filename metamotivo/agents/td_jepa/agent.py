@@ -47,6 +47,7 @@ class TDJEPAAgentTrainConfig(BaseConfig):
     tilt_temperature_start: float = 20.0
     tilt_temperature_end: float = 1.0
     tilt_candidate_multiplier: int = 10
+    tilt_init_geom_ratio: float = 0.9
 
 
 class TDJEPAAgentConfig(BaseConfig):
@@ -82,6 +83,7 @@ class TDJEPAAgent:
                 beta=self.cfg.train.tilt_beta,
                 temperature=self.cfg.train.tilt_temperature,
                 candidate_multiplier=self.cfg.train.tilt_candidate_multiplier,
+                init_geom_ratio=self.cfg.train.tilt_init_geom_ratio,
             )
 
     @property
