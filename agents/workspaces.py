@@ -1,5 +1,12 @@
 """Module that creates workspaces for training/evaling various agents."""
 
+import os
+
+os.environ.setdefault("WANDB_CONSOLE", "off")
+os.environ.setdefault("WANDB_DISABLE_CODE", "true")
+os.environ.setdefault("WANDB_DISABLE_GIT", "true")
+os.environ.setdefault("WANDB_SILENT", "true")
+
 import wandb
 import torch
 import shutil
@@ -86,6 +93,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
                 config=agent_config,
                 tags=[agent.name],
                 reinit=True,
+                settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
             model_path = self.model_dir / run.name
             makedirs(str(model_path))
@@ -565,6 +573,7 @@ class FinetuningWorkspace(OfflineRLWorkspace):
                 config=agent_config,
                 tags=[agent.name, "finetuning"],
                 reinit=True,
+                settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
 
         else:
@@ -699,6 +708,7 @@ class FinetuningWorkspace(OfflineRLWorkspace):
                 config=agent_config,
                 tags=[agent.name, "finetuning"],
                 reinit=True,
+                settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
 
         else:
@@ -893,6 +903,7 @@ class D4RLWorkspace:
                 config=agent_config,
                 tags=[agent.name, "D4RL"],
                 reinit=True,
+                settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
 
         logger.info(f"Training {agent.name}.")

@@ -3,6 +3,13 @@
 """Module for holding abstract base classes for all agents."""
 
 import abc
+import os
+
+os.environ.setdefault("WANDB_CONSOLE", "off")
+os.environ.setdefault("WANDB_DISABLE_CODE", "true")
+os.environ.setdefault("WANDB_DISABLE_GIT", "true")
+os.environ.setdefault("WANDB_SILENT", "true")
+
 import numpy as np
 import torch
 import wandb
@@ -486,6 +493,7 @@ class AbstractLogger(metaclass=abc.ABCMeta):
                 config=agent_config,
                 tags=wandb_tags,
                 reinit=True,
+                settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
 
     def log(self, metrics: Dict[str, float]):
@@ -896,6 +904,30 @@ class OfflineReplayBuffer(AbstractOfflineReplayBuffer):
         timesteps = torch.arange(observations.shape[0], dtype=torch.long)
         not_dones = torch.ones((observations.shape[0], 1), dtype=torch.float32)
         not_dones[-1] = 0.0
+
+        if "rewards" in self.storage and rewards.shape[-1] != self.storage["rewards"].shape[-1]:
+            target_dim = self.storage["rewards"].shape[-1]
+            if target_dim == len(self._reward_constructor.task_names):
+                reward_physics = np.asarray(episode["physics"][1:])
+                task_rewards = []
+                env = self._reward_constructor._env
+                for state in reward_physics:
+                    with env.physics.reset_context():
+                        env.physics.set_state(state)
+                    task_rewards.append(self._reward_constructor(env.physics))
+                rewards = torch.as_tensor(np.asarray(task_rewards), dtype=torch.float32)
+            elif rewards.shape[-1] == 1:
+                rewards = rewards.expand(-1, target_dim).clone()
+            else:
+                rewards = rewards[:, :target_dim]
+
+        if "discounts" in self.storage and discounts.shape[-1] != self.storage["discounts"].shape[-1]:
+            target_dim = self.storage["discounts"].shape[-1]
+            discounts = discounts.expand(-1, target_dim).clone()
+
+        if "not_dones" in self.storage and not_dones.shape[-1] != self.storage["not_dones"].shape[-1]:
+            target_dim = self.storage["not_dones"].shape[-1]
+            not_dones = not_dones.expand(-1, target_dim).clone()
 
         future_idxs = np.arange(observations.shape[0]) + np.random.geometric(
             p=(1 - self._future), size=observations.shape[0]
