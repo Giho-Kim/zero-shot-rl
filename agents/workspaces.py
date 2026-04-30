@@ -281,6 +281,24 @@ class OfflineRLWorkspace(AbstractWorkspace):
             rewards.append(float(reward.reshape(-1)[0]))
         return np.asarray(rewards, dtype=np.float32)
 
+    def _pack_collection_reward(
+        self,
+        timestep_reward: float,
+        reward_dim: int,
+    ) -> np.ndarray:
+        if reward_dim == 1:
+            return self._pack_scalar(timestep_reward)
+
+        task_rewards = self._pack_task_rewards()
+        if task_rewards.shape[0] == reward_dim:
+            return task_rewards
+        if task_rewards.shape[0] > reward_dim:
+            return task_rewards[:reward_dim]
+        raise ValueError(
+            f"Cannot pack collection reward with dim {task_rewards.shape[0]} "
+            f"for replay reward dim {reward_dim}."
+        )
+
     def _current_physics(self) -> np.ndarray:
         return np.asarray(self.env.physics.state())
 
@@ -289,13 +307,14 @@ class OfflineRLWorkspace(AbstractWorkspace):
         agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
         condition: Optional[np.ndarray],
         step: int,
+        reward_dim: int,
     ) -> Dict[str, np.ndarray]:
         timestep = self.env.reset()
         action_spec = self.env.action_spec()
         episode = {
             "observation": [self._extract_observation(timestep)],
             "action": [np.zeros(action_spec.shape, dtype=np.float32)],
-            "reward": [self._pack_task_rewards()],
+            "reward": [self._pack_collection_reward(timestep.reward, reward_dim)],
             "discount": [self._pack_scalar(timestep.discount)],
             "physics": [self._current_physics()],
         }
@@ -320,7 +339,9 @@ class OfflineRLWorkspace(AbstractWorkspace):
             timestep = self.env.step(action)
             episode["observation"].append(self._extract_observation(timestep))
             episode["action"].append(np.asarray(action, dtype=np.float32))
-            episode["reward"].append(self._pack_task_rewards())
+            episode["reward"].append(
+                self._pack_collection_reward(timestep.reward, reward_dim)
+            )
             episode["discount"].append(self._pack_scalar(timestep.discount))
             episode["physics"].append(self._current_physics())
 
@@ -420,6 +441,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
             replay_buffer=replay_buffer,
             step=step,
         )
+        reward_dim = int(replay_buffer.storage["rewards"].shape[-1])
         episodes = []
         for _ in range(self.collection_episodes):
             condition = self._sample_training_condition(
@@ -432,6 +454,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
                     agent=agent,
                     condition=condition,
                     step=step,
+                    reward_dim=reward_dim,
                 )
             )
 
