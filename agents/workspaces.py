@@ -154,6 +154,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
                 tilt_metrics = self._eval_task_tilt_score_metrics(
                     agent=agent,
                     observations=batch.observations,
+                    timesteps=batch.timesteps,
                     tasks=tasks,
                     step=i,
                 )
@@ -287,12 +288,22 @@ class OfflineRLWorkspace(AbstractWorkspace):
         metrics = {}
         mean_task_performance = 0.0
         for task, rewards in eval_rewards.items():
+            rewards = np.asarray(rewards, dtype=np.float32)
             mean_task_reward = stats.trim_mean(rewards, 0.25)  # IQM
             metrics[f"eval/{task}/episode_reward_iqm"] = mean_task_reward
             mean_task_performance += mean_task_reward
 
         # log mean task performance
         metrics["eval/task_reward_iqm"] = mean_task_performance / len(tasks)
+        eval_parts = [
+            f"{key}={value:.4g}"
+            for key, value in metrics.items()
+            if key.startswith("eval/")
+        ]
+        print(
+            "[eval returns] " + ", ".join(eval_parts),
+            flush=True,
+        )
 
         if hasattr(agent, "std_dev_schedule") and self.train_std is not None:
             agent.std_dev_schedule = self.train_std
@@ -448,6 +459,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
         self,
         agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
         observations: torch.Tensor,
+        timesteps: torch.Tensor,
         tasks: List[str],
         step: int,
     ) -> Dict[str, float]:
@@ -458,6 +470,14 @@ class OfflineRLWorkspace(AbstractWorkspace):
             or not hasattr(self, "goal_states")
         ):
             return {}
+
+        init_timesteps = timesteps.to(device=observations.device, dtype=observations.dtype)
+        init_weights = torch.pow(agent.tilt.init_geom_ratio, init_timesteps)
+        init_weights = init_weights / init_weights.sum()
+        obs_idx = torch.multinomial(
+            init_weights, num_samples=observations.shape[0], replacement=True
+        )
+        observations = observations[obs_idx]
 
         metrics = {}
         score_parts = []
@@ -484,7 +504,9 @@ class OfflineRLWorkspace(AbstractWorkspace):
 
         if score_parts:
             print(
-                f"[tilt eval-task scores] step={step} " + ", ".join(score_parts),
+                f"[tilt eval-task scores] step={step} "
+                f"geom_ratio={agent.tilt.init_geom_ratio} "
+                + ", ".join(score_parts),
                 flush=True,
             )
 
