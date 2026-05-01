@@ -44,6 +44,7 @@ def _configure_wandb_run(run) -> None:
     run.define_metric("train/*", step_metric="step")
     run.define_metric("eval/*", step_metric="step")
     run.define_metric("collection/*", step_metric="step")
+    run.define_metric("tilt/*", step_metric="step")
 
 
 def _log_wandb(run, metrics: Dict[str, float], step: int) -> None:
@@ -147,8 +148,15 @@ class OfflineRLWorkspace(AbstractWorkspace):
 
             eval_metrics = {}
             collection_metrics = {}
+            tilt_metrics = {}
 
             if i % self.eval_frequency == 0:
+                tilt_metrics = self._eval_task_tilt_score_metrics(
+                    agent=agent,
+                    observations=batch.observations,
+                    tasks=tasks,
+                    step=i,
+                )
                 eval_metrics = self.eval(agent=agent, tasks=tasks)
 
                 if eval_metrics["eval/task_reward_iqm"] > best_mean_task_reward:
@@ -183,7 +191,12 @@ class OfflineRLWorkspace(AbstractWorkspace):
                     step=i,
                 )
 
-            metrics = {**train_metrics, **eval_metrics, **collection_metrics}
+            metrics = {
+                **train_metrics,
+                **eval_metrics,
+                **collection_metrics,
+                **tilt_metrics,
+            }
 
             if self.wandb_logging and (
                 i % self.eval_frequency == 0 or bool(collection_metrics)
@@ -430,6 +443,52 @@ class OfflineRLWorkspace(AbstractWorkspace):
                 f"positive_frac={(rewards[:, idx] > 0).mean():.4f}",
                 flush=True,
             )
+
+    def _eval_task_tilt_score_metrics(
+        self,
+        agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
+        observations: torch.Tensor,
+        tasks: List[str],
+        step: int,
+    ) -> Dict[str, float]:
+        if (
+            self.domain_name != "point_mass_maze"
+            or not isinstance(agent, FB)
+            or agent.tilt is None
+            or not hasattr(self, "goal_states")
+        ):
+            return {}
+
+        metrics = {}
+        score_parts = []
+        for task in tasks:
+            if task not in self.goal_states:
+                continue
+            z = agent.infer_z(self.goal_states[task])
+            z = torch.as_tensor(
+                z,
+                dtype=observations.dtype,
+                device=observations.device,
+            ).unsqueeze(0)
+            z = z.expand(observations.shape[0], -1)
+            scores, _ = agent.score_and_features(
+                observations=observations,
+                z=z,
+                step=step,
+            )
+            score_mean = float(scores.mean().detach().cpu())
+            score_std = float(scores.std(unbiased=False).detach().cpu())
+            metrics[f"tilt/score_mean/{task}"] = score_mean
+            metrics[f"tilt/score_std/{task}"] = score_std
+            score_parts.append(f"{task}={score_mean:.4f}+/-{score_std:.4f}")
+
+        if score_parts:
+            print(
+                f"[tilt eval-task scores] step={step} " + ", ".join(score_parts),
+                flush=True,
+            )
+
+        return metrics
 
     def _refresh_collection_tilt(
         self,
