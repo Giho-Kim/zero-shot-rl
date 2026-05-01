@@ -37,6 +37,22 @@ from agents.td_jepa.agent import TDJEPA
 from agents.base import D4RLReplayBuffer
 
 
+def _configure_wandb_run(run) -> None:
+    if run is None:
+        return
+    run.define_metric("step")
+    run.define_metric("train/*", step_metric="step")
+    run.define_metric("eval/*", step_metric="step")
+    run.define_metric("collection/*", step_metric="step")
+
+
+def _log_wandb(run, metrics: Dict[str, float], step: int) -> None:
+    if not metrics:
+        return
+    metrics = {**metrics, "step": step}
+    run.log(metrics, step=step)
+
+
 class OfflineRLWorkspace(AbstractWorkspace):
     """
     Trains/evals/rollouts an offline RL agent given
@@ -95,6 +111,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
                 reinit=True,
                 settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
+            _configure_wandb_run(run)
             model_path = self.model_dir / run.name
             makedirs(str(model_path))
 
@@ -171,7 +188,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
             if self.wandb_logging and (
                 i % self.eval_frequency == 0 or bool(collection_metrics)
             ):
-                run.log(metrics)
+                _log_wandb(run, metrics, i)
 
         if self.wandb_logging:
             # save to wandb_logging
@@ -361,6 +378,59 @@ class OfflineRLWorkspace(AbstractWorkspace):
             "physics": np.asarray(episode["physics"]),
         }
 
+    def _collection_reward_names(self, reward_dim: int) -> List[str]:
+        task_names = list(self.reward_functions.keys())
+        if len(task_names) == reward_dim:
+            return task_names
+        return [f"reward_{i}" for i in range(reward_dim)]
+
+    def _print_collection_reward_stats(
+        self,
+        episodes: List[Dict[str, np.ndarray]],
+        step: int,
+    ) -> None:
+        transition_rewards = [
+            np.asarray(episode["reward"][1:], dtype=np.float32)
+            for episode in episodes
+            if episode["reward"].shape[0] > 1
+        ]
+        if not transition_rewards:
+            print(
+                f"[collection rewards] step={step} no transitions collected",
+                flush=True,
+            )
+            return
+
+        rewards = np.concatenate(transition_rewards, axis=0)
+        if rewards.ndim == 1:
+            rewards = rewards[:, None]
+
+        episode_returns = np.asarray(
+            [reward.sum(axis=0) for reward in transition_rewards],
+            dtype=np.float32,
+        )
+        episode_max_rewards = np.asarray(
+            [reward.max(axis=0) for reward in transition_rewards],
+            dtype=np.float32,
+        )
+        reward_names = self._collection_reward_names(rewards.shape[-1])
+
+        print(
+            f"[collection rewards] step={step} episodes={len(transition_rewards)} "
+            f"transitions={rewards.shape[0]}",
+            flush=True,
+        )
+        for idx, name in enumerate(reward_names):
+            print(
+                f"  {name}: "
+                f"mean_step={rewards[:, idx].mean():.4f}, "
+                f"mean_return={episode_returns[:, idx].mean():.2f}, "
+                f"mean_ep_max={episode_max_rewards[:, idx].mean():.4f}, "
+                f"max={rewards[:, idx].max():.4f}, "
+                f"positive_frac={(rewards[:, idx] > 0).mean():.4f}",
+                flush=True,
+            )
+
     def _refresh_collection_tilt(
         self,
         agent: Union[CQL, FB, CFB, GCIQL, SF, TDJEPA],
@@ -466,6 +536,7 @@ class OfflineRLWorkspace(AbstractWorkspace):
                 )
             )
 
+        self._print_collection_reward_stats(episodes=episodes, step=step)
         transitions_added = replay_buffer.add_episodes(episodes)
 
         if (
@@ -575,6 +646,7 @@ class FinetuningWorkspace(OfflineRLWorkspace):
                 reinit=True,
                 settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
+            _configure_wandb_run(run)
 
         else:
             date = datetime.today().strftime("Y-%m-%d-%H-%M-%S")
@@ -679,7 +751,7 @@ class FinetuningWorkspace(OfflineRLWorkspace):
             metrics = {**train_metrics, **eval_metrics}
 
             if self.wandb_logging:
-                run.log(metrics)
+                _log_wandb(run, metrics, i)
 
         if self.wandb_logging:
             # save to wandb_logging
@@ -710,6 +782,7 @@ class FinetuningWorkspace(OfflineRLWorkspace):
                 reinit=True,
                 settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
+            _configure_wandb_run(run)
 
         else:
             date = datetime.today().strftime("Y-%m-%d-%H-%M-%S")
@@ -843,7 +916,7 @@ class FinetuningWorkspace(OfflineRLWorkspace):
                 metrics = {**train_metrics, **eval_metrics}
 
                 if self.wandb_logging:
-                    run.log(metrics)
+                    _log_wandb(run, metrics, j)
 
         if self.wandb_logging:
             # save to wandb_logging
@@ -905,6 +978,7 @@ class D4RLWorkspace:
                 reinit=True,
                 settings=wandb.Settings(console="off", _disable_stats=True, silent=True),
             )
+            _configure_wandb_run(run)
 
         logger.info(f"Training {agent.name}.")
         best_mean_task_reward = -np.inf
@@ -942,7 +1016,7 @@ class D4RLWorkspace:
             metrics = {**train_metrics, **eval_metrics}
 
             if self.wandb_logging:
-                run.log(metrics)
+                _log_wandb(run, metrics, i)
 
         if self.wandb_logging:
             run.finish()
