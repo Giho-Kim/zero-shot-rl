@@ -211,7 +211,7 @@ class FB(AbstractAgent):
                     step=step,
                 ),
             )
-        zs = self.sample_mixed_z(train_goal=backward_input)
+        zs = self.sample_mixed_z(train_goal=backward_input, step=step)
         actor_zs = zs.clone().requires_grad_(True)
         actor_observations = batch.observations.clone().requires_grad_(True)
 
@@ -250,7 +250,9 @@ class FB(AbstractAgent):
         return metrics
 
     @torch.no_grad()
-    def sample_mixed_z(self, train_goal: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def sample_mixed_z(
+        self, train_goal: Optional[torch.Tensor] = None, step: Optional[int] = None
+    ) -> torch.Tensor:
         if self.tilt is None:
             zs = self.sample_z(size=self.batch_size)
         else:
@@ -258,13 +260,49 @@ class FB(AbstractAgent):
 
         if train_goal is not None:
             mix_indices = np.where(np.random.rand(self.batch_size) < self._z_mix_ratio)[0]
-            mix_zs = self.FB.backward_representation(train_goal[mix_indices]).detach()
-            mix_zs = math.sqrt(self._z_dimension) * torch.nn.functional.normalize(
-                mix_zs, dim=1
-            )
-            zs[mix_indices] = mix_zs
+            if len(mix_indices) > 0:
+                if self.tilt is None:
+                    mix_zs = self.FB.backward_representation(
+                        train_goal[mix_indices]
+                    ).detach()
+                    mix_zs = math.sqrt(
+                        self._z_dimension
+                    ) * torch.nn.functional.normalize(mix_zs, dim=1)
+                else:
+                    if step is None:
+                        raise ValueError("step is required when sampling tilted goal z.")
+                    mix_zs = self.sample_tilted_goal_z(
+                        train_goal=train_goal, size=len(mix_indices), step=step
+                    )
+                zs[mix_indices] = mix_zs
 
         return zs
+
+    @torch.no_grad()
+    def sample_tilted_goal_z(
+        self, train_goal: torch.Tensor, size: int, step: int
+    ) -> torch.Tensor:
+        candidate_size = 2 * size
+        candidate_indices = torch.randint(
+            0, train_goal.shape[0], (candidate_size,), device=train_goal.device
+        )
+        goal_candidates = train_goal[candidate_indices]
+        z_candidates = self.FB.backward_representation(goal_candidates).detach()
+        z_candidates = math.sqrt(self._z_dimension) * torch.nn.functional.normalize(
+            z_candidates, dim=1
+        )
+
+        candidate_score, _ = self.score_and_features(
+            observations=goal_candidates,
+            z=z_candidates,
+            step=step,
+        )
+        logits = candidate_score / self.tilt.temperature
+        logits = logits - logits.max()
+        prob = torch.softmax(logits, dim=0)
+        selected_idx = torch.multinomial(prob, num_samples=size, replacement=False)
+
+        return z_candidates[selected_idx]
 
     @torch.no_grad()
     def score_and_features(
