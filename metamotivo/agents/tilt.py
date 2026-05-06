@@ -55,10 +55,9 @@ class TiltLatentSelector:
         prob = torch.softmax(logits, dim=0)
         selected_idx = torch.multinomial(prob, num_samples=n, replacement=False)
 
-        selected_weights = candidate_init_weights[selected_idx]
-        selected_weights = selected_weights / selected_weights.sum()
-        weighted_features = feature_stats[selected_idx] * selected_weights.unsqueeze(-1)
-        gram_batch = feature_stats[selected_idx].T @ weighted_features
+        candidate_weights = candidate_init_weights / candidate_init_weights.sum()
+        weighted_features = feature_stats * candidate_weights.unsqueeze(-1)
+        gram_batch = feature_stats.T @ weighted_features
         self.gram.mul_(self.beta).add_((1 - self.beta) * gram_batch)
         self.z = z_candidates[selected_idx]
         return self.z
